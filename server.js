@@ -11,7 +11,7 @@ app.use(express.json({ limit: '50mb' }));
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash-latest",
+    model: "gemini-1.5-flash-001",
     generationConfig: { 
         responseMimeType: "application/json",
         temperature: 0 
