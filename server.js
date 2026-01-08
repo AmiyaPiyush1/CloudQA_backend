@@ -5,16 +5,21 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(cors());
-
 app.use(express.json({ limit: '50mb' }));
+
+// 1. HEALTH CHECK (Ping this to see if Vercel is alive)
+app.get('/', (req, res) => {
+    res.send("✅ Server is Running! Send POST requests to /api/agent/decide");
+});
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
+// 2. SPEED CONFIGURATION (Crucial for Vercel Free Tier)
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash-lite", // Faster than Pro/2.0
     generationConfig: { 
         responseMimeType: "application/json",
-        temperature: 0 
+        temperature: 0.1,      // Precise code
     }
 });
 
@@ -23,67 +28,67 @@ function parseGeminiResponse(text) {
         const cleaned = text.replace(/```json|```/g, '').trim();
         return JSON.parse(cleaned);
     } catch (e) {
-        console.error("Failed to parse JSON:", text);
-        return { error: "Invalid JSON from AI", raw: text };
+        console.error("JSON Parse Error:", text);
+        return { error: "Invalid JSON", raw: text };
     }
 }
 
 app.post('/api/agent/decide', async (req, res) => {
+  console.log("⏱️ Request Received");
+  const start = Date.now();
+
   try {
-    const { userIntent, domSnapshot, currentUrl, previousActions } = req.body;
+    const { userIntent, domSnapshot, currentUrl } = req.body;
 
-    console.log(`\n--- NEW TURN ---`);
-    console.log(`[Goal]: "${userIntent}"`);
-    console.log(`[URL]: ${currentUrl}`);
-
+    // 3. THE "SENIOR ENGINEER" PROMPT
     const prompt = `
-      You are an autonomous browser agent. Your job is to achieve the user's GOAL.
-      
-      === CONTEXT ===
+      You are a Senior Frontend Automation Engineer. 
+      Your goal is to write a ROBUST, SELF-CONTAINED JavaScript function to accomplish the user's request on the provided DOM.
+
+      === USER CONTEXT ===
       GOAL: "${userIntent}"
-      CURRENT URL: "${currentUrl}"
-      PREVIOUS ACTIONS: ${JSON.stringify(previousActions || [])}
+      URL: "${currentUrl}"
       
-      === HTML SNAPSHOT ===
+      === DOM SNAPSHOT (Cleaned) ===
       ${domSnapshot}
 
-      === RULES ===
-      1. ANALYZE: Look at the HTML. Does it match the Goal?
-      2. HISTORY: Do not repeat the exact same action from PREVIOUS ACTIONS if it didn't work.
-      3. POPUPS: If a popup obscures the view, close it first.
-      4. FINISH: If the goal is achieved, return action: "completed".
-      5. SELECTORS: Use resilient selectors (aria-label, placeholder, text content).
+      === CODING GUIDELINES (STRICT) ===
+      1. **Output Format:** Return a valid JSON object with a "script" field containing the code.
+      2. **Structure:** The code MUST be an IIFE: (async function() { ... })();
+      3. **Robustness:** - NEVER just set .value directly. You MUST dispatch 'input', 'keydown', and 'keyup' events to trigger listeners.
+         - Use resilient selectors (IDs, Names). Avoid generic classes.
+      4. **Select2 / Dropdowns:** - Type the text letter-by-letter.
+         - POLL (wait loop) for the results container (.select2-results__option) to appear.
+         - Click the specific result element.
+      5. **Error Handling:** Log "✅ Success" or "❌ Error" to the console.
 
-      === OUTPUT FORMAT (JSON ONLY) ===
-      Return a JSON object with these fields:
+      === RESPONSE SCHEMA ===
       {
-        "thought": "Reasoning for the action", 
-        "action": "click" | "type" | "wait" | "completed",
-        "selector": "CSS selector (null if completed)",
-        "value": "Text to type (only for type action)",
-        "description": "Short description for human approval"
+        "thought": "Reasoning...",
+        "script": "The Javascript code string...",
+        "description": "Short summary"
       }
     `;
 
-    const result = await model.generateContent(prompt);
+    // 4. TIMEOUT RACE (Fails gracefully after 9s instead of crashing)
+    const resultPromise = model.generateContent(prompt);
+    const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Gemini took too long")), 9000)
+    );
+
+    const result = await Promise.race([resultPromise, timeoutPromise]);
+    console.log(`✅ AI Responded in ${(Date.now() - start)/1000}s`);
+
     const responseText = result.response.text();
-    
     const actionPlan = parseGeminiResponse(responseText);
-    
-    console.log(`[AI Plan]: ${actionPlan.thought}`);
-    console.log(`[Action]: ${actionPlan.action} -> ${actionPlan.selector}`);
 
     res.json(actionPlan);
 
   } catch (error) {
-    console.error("SERVER ERROR:", error);
+    console.error("🔥 ERROR:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
 
-module.exports = app;
-
-if (require.main === module) {
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
-}
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
