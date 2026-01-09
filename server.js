@@ -15,7 +15,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 // 2. CONFIGURATION (Fixed Model Name)
 // "gemini-2.5-flash-lite" does not exist yet. Using the stable Flash model.
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash-lite", 
+    model: "gemini-3-flash", 
     generationConfig: { 
         responseMimeType: "application/json",
         temperature: 0.0,      
