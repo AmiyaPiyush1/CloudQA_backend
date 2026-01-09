@@ -12,7 +12,8 @@ app.get('/', (req, res) => res.send("✅ Server is Running!"));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// 2. SPEED CONFIGURATION
+// 2. CONFIGURATION (Fixed Model Name)
+// "gemini-2.5-flash-lite" does not exist yet. Using the stable Flash model.
 const model = genAI.getGenerativeModel({ 
     model: "gemini-2.5-flash-lite", 
     generationConfig: { 
@@ -28,6 +29,7 @@ function parseGeminiResponse(text) {
         return JSON.parse(cleaned);
     } catch (e) {
         try {
+            // Fix newlines inside strings if the AI added them
             const fixed = text.replace(/(?<=: ")([\s\S]*?)(?=")/g, (match) => match.replace(/\n/g, "\\n"));
             return JSON.parse(fixed);
         } catch (e2) {
@@ -43,7 +45,7 @@ app.post('/api/agent/decide', async (req, res) => {
     const { userIntent, domSnapshot, currentUrl } = req.body;
 
     // ============================================================
-    // 🔍 DEEP INSPECTION LOGGING
+    // 🔍 DEEP INSPECTION: DOM LOGGING
     // ============================================================
     console.log("\n⬇️ ⬇️ ⬇️ ⬇️ ⬇️ INCOMING REQUEST ⬇️ ⬇️ ⬇️ ⬇️ ⬇️");
     console.log(`🎯 GOAL: "${userIntent}"`);
@@ -52,11 +54,11 @@ app.post('/api/agent/decide', async (req, res) => {
     if (domSnapshot) {
         console.log(`📦 TOTAL DOM SIZE: ${domSnapshot.length} characters`);
         
-        // Split by newlines to give you exactly 100 lines
+        // Print exactly the first 100 lines so you can see the structure
         const domLines = domSnapshot.split('\n');
         const previewLines = domLines.slice(0, 100).join('\n');
         
-        console.log("\n📄 DOM SNAPSHOT (First 100 Lines):");
+        console.log("\n📄 DOM SNAPSHOT (Top 100 Lines):");
         console.log("--------------------------------------------------");
         console.log(previewLines);
         console.log("--------------------------------------------------");
@@ -69,17 +71,21 @@ app.post('/api/agent/decide', async (req, res) => {
     }
     // ============================================================
 
+    // ⚠️ STRICT PROMPT RE-APPLIED
+    // (Prevents the 'require is not defined' error)
     const prompt = `
       CONTEXT: User wants to "${userIntent}" on URL "${currentUrl}".
       DOM: ${domSnapshot}
 
       TASK: Return a JSON object with a JavaScript IIFE to execute this.
-      RULES:
-      1. Use (async function(){ ... })(); format.
-      2. Dropdowns: Type text -> Poll for .select2-results__option -> Click result.
-      3. Input: Dispatch 'input', 'keydown', 'keyup' events.
-      4. Selectors: Use IDs (#tab-flights) or Names (name='from').
-      5. NO EXPLANATIONS. ONLY JSON.
+      
+      ⚠️ STRICT CONSTRAINTS (MUST FOLLOW):
+      1. USE ONLY VANILLA JAVASCRIPT (No 'require', No 'import', No Cypress/Playwright/Selenium).
+      2. USE DOM APIs: document.querySelector, dispatchEvent, click(), value = "".
+      3. EVENT DISPATCHING: When typing, you MUST dispatch 'keydown', 'input', and 'keyup' for every character.
+      4. POLLING: Use 'await new Promise' with 'setInterval' to wait for dropdowns.
+      5. SELECTORS: Prioritize IDs (#flights-search) and Name attributes (name='from').
+      6. OUTPUT FORMAT: Single line JSON.
 
       SCHEMA: { "script": "string", "thought": "string" }
     `;
@@ -90,7 +96,7 @@ app.post('/api/agent/decide', async (req, res) => {
     const responseText = result.response.text();
     
     // ============================================================
-    // 🔍 AI RESPONSE LOGGING
+    // 🔍 DEEP INSPECTION: RESPONSE LOGGING
     // ============================================================
     console.log(`\n✅ AI GENERATED IN ${duration}s`);
     console.log("🤖 RAW RESPONSE FROM AI:");
