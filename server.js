@@ -61,6 +61,11 @@ app.post('/api/agent/decide', async (req, res) => {
     2. If the user wants to OPEN a URL, the first step must be type: "open".
     3. If the user wants to TYPE, include the 'value' field.
     4. If the user wants to CLICK, 'value' is not needed.
+    RULES:
+    1. ANALYZE ONLY THE PROVIDED DOM. Do not hallucinate elements that "should" be there.
+    2. ONE PAGE AT A TIME. If a user wants to "Book a Hotel", but you are on the Search Page, your ONLY job is to fill the search form and click "Search". Do NOT try to select a room yet.
+    3. STOP ON NAVIGATION. If an action (like clicking "Search" or "Login") will cause a page reload, that MUST be the LAST action in your array.
+    4. NO FUTURE PLANNING. Do not return steps for the next page.
     
     RESPONSE FORMAT (JSON ARRAY):
     [
