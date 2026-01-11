@@ -12,11 +12,10 @@ app.get('/', (req, res) => res.send("✅ Server is Running!"));
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash", 
+    model: "gemini-2.5-flash",
     generationConfig: { 
         responseMimeType: "application/json",
-        temperature: 0.0,      
-        maxOutputTokens: 2000 
+        temperature: 0.1,
     }
 });
 
@@ -25,68 +24,71 @@ function parseGeminiResponse(text) {
         let cleaned = text.replace(/```json|```/g, '').trim();
         return JSON.parse(cleaned);
     } catch (e) {
-        try {
-            const fixed = text.replace(/(?<=: ")([\s\S]*?)(?=")/g, (match) => match.replace(/\n/g, "\\n"));
-            return JSON.parse(fixed);
-        } catch (e2) {
-            console.error("❌ FATAL JSON Error:", text);
-            return { error: "Invalid JSON", raw: text };
-        }
+        console.error("❌ JSON Parse Error:", text);
+        return { error: "Invalid JSON", raw: text };
     }
 }
 
 app.post('/api/agent/decide', async (req, res) => {
   const start = Date.now();
   try {
-    // We accept 'systemPrompt' from the frontend now
-    const { userIntent, domSnapshot, currentUrl, systemPrompt } = req.body;
-
-    console.log(`\n🎯 INTENT: "${userIntent}"`);
+    const { userIntent, domSnapshot, currentUrl } = req.body;
+    console.log("\n⬇️ ⬇️ ⬇️ ⬇️ ⬇️ INCOMING REQUEST ⬇️ ⬇️ ⬇️ ⬇️ ⬇️");
+    console.log(`🎯 GOAL: "${userIntent}"`);
     console.log(`🔗 URL: ${currentUrl}`);
-
-    // ============================================================
-    // 🧠 THE NEW BRAIN: "Hybrid Command Mode"
-    // ============================================================
+    
+    if (domSnapshot) {
+        console.log(`📦 DOM SIZE: ${domSnapshot.length} chars`);
+    } else {
+        console.error("❌ ERROR: DOM Snapshot is EMPTY!");
+        return res.status(400).json({ error: "DOM Snapshot required" });
+    }
     const prompt = `
-      CONTEXT: User wants to "${userIntent}" on URL "${currentUrl}".
-      
-      SYSTEM NOTES: ${systemPrompt || "None"}
+    You are an intelligent QA Automation Agent.
+    
+    TASK: Analyze the provided DOM Snapshot and map the USER INTENT to a sequence of actionable steps.
+    OUTPUT: Return a STRICT JSON ARRAY of objects.
+    
+    USER INTENT: "${userIntent}"
+    CURRENT URL: "${currentUrl}"
+    
+    DOM SNAPSHOT:
+    ${domSnapshot}
 
-      DOM SNAPSHOT (Truncated):
-      ${domSnapshot ? domSnapshot.substring(0, 25000) : "No DOM provided"}
-
-      TASK: 
-      Return a JSON object with a JavaScript execution plan.
-      
-      ⚠️ CRITICAL INSTRUCTION:
-      The frontend has a built-in "Hybrid Helper" library. 
-      You do NOT need to write complex event logic (no dispatchEvent, no input.value=...).
-      Simply return the async function calls using the provided helpers.
-
-      AVAILABLE HELPERS (Use these exclusively):
-      - await typeText(selector, text)  // Handles focus, clearing, typing, and React events automatically.
-      - await clickElement(selector)    // Handles waiting, scrolling, and clicking safely.
-
-      RULES:
-      1. Analyze the DOM to find the best CSS selectors (IDs preferred).
-      2. Return ONLY the sequence of helper calls.
-      3. Do NOT define the helpers yourself. They are already there.
-      4. OUTPUT FORMAT: Single line JSON.
-
-      SCHEMA: { "script": "string", "thought": "string" }
+    ---------------------------------------------------
+    ⚠️ RULES FOR SELECTORS:
+    1. Look for 'id', 'name', 'data-test', 'data-testid', or unique 'class' attributes.
+    2. If the user wants to OPEN a URL, the first step must be type: "open".
+    3. If the user wants to TYPE, include the 'value' field.
+    4. If the user wants to CLICK, 'value' is not needed.
+    
+    RESPONSE FORMAT (JSON ARRAY):
+    [
+      {
+        "name": "Short human-readable name of element",
+        "type": "click" | "type" | "open",
+        "selector": "CSS Selector (e.g. #username, .btn-primary)",
+        "value": "Text to type (only if type is 'type') or URL (if type is 'open')"
+      }
+    ]
+    ---------------------------------------------------
     `;
 
     const result = await model.generateContent(prompt);
     const duration = (Date.now() - start)/1000;
     
     const responseText = result.response.text();
-    console.log(`✅ AI Replied in ${duration}s`);
-
     const actionPlan = parseGeminiResponse(responseText);
+
+    console.log(`\n✅ AI GENERATED IN ${duration}s`);
+    console.log("🤖 ACTION PLAN:");
+    console.log(JSON.stringify(actionPlan, null, 2));
+    console.log("⬆️ ⬆️ ⬆️ ⬆️ ⬆️ END OF TURN ⬆️ ⬆️ ⬆️ ⬆️ ⬆️\n");
+
     res.json(actionPlan);
 
   } catch (error) {
-    console.error("🔥 ERROR:", error.message);
+    console.error("🔥 SERVER ERROR:", error.message);
     res.status(500).json({ error: error.message });
   }
 });
