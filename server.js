@@ -7,15 +7,12 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-// 1. HEALTH CHECK
 app.get('/', (req, res) => res.send("✅ Server is Running!"));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
-// 2. CONFIGURATION (Fixed Model Name)
-// "gemini-2.5-flash-lite" does not exist yet. Using the stable Flash model.
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash-lite", 
+    model: "gemini-2.5-flash", 
     generationConfig: { 
         responseMimeType: "application/json",
         temperature: 0.0,      
@@ -29,7 +26,6 @@ function parseGeminiResponse(text) {
         return JSON.parse(cleaned);
     } catch (e) {
         try {
-            // Fix newlines inside strings if the AI added them
             const fixed = text.replace(/(?<=: ")([\s\S]*?)(?=")/g, (match) => match.replace(/\n/g, "\\n"));
             return JSON.parse(fixed);
         } catch (e2) {
@@ -42,50 +38,40 @@ function parseGeminiResponse(text) {
 app.post('/api/agent/decide', async (req, res) => {
   const start = Date.now();
   try {
-    const { userIntent, domSnapshot, currentUrl } = req.body;
+    // We accept 'systemPrompt' from the frontend now
+    const { userIntent, domSnapshot, currentUrl, systemPrompt } = req.body;
 
-    // ============================================================
-    // 🔍 DEEP INSPECTION: DOM LOGGING
-    // ============================================================
-    console.log("\n⬇️ ⬇️ ⬇️ ⬇️ ⬇️ INCOMING REQUEST ⬇️ ⬇️ ⬇️ ⬇️ ⬇️");
-    console.log(`🎯 GOAL: "${userIntent}"`);
+    console.log(`\n🎯 INTENT: "${userIntent}"`);
     console.log(`🔗 URL: ${currentUrl}`);
-    
-    if (domSnapshot) {
-        console.log(`📦 TOTAL DOM SIZE: ${domSnapshot.length} characters`);
-        
-        // Print exactly the first 100 lines so you can see the structure
-        const domLines = domSnapshot.split('\n');
-        const previewLines = domLines.slice(0, 100).join('\n');
-        
-        console.log("\n📄 DOM SNAPSHOT (Top 100 Lines):");
-        console.log("--------------------------------------------------");
-        console.log(previewLines);
-        console.log("--------------------------------------------------");
-        
-        if (domLines.length > 100) {
-            console.log(`... (${domLines.length - 100} more lines hidden) ...`);
-        }
-    } else {
-        console.error("❌ ERROR: DOM Snapshot is EMPTY or UNDEFINED!");
-    }
-    // ============================================================
 
-    // ⚠️ STRICT PROMPT RE-APPLIED
-    // (Prevents the 'require is not defined' error)
+    // ============================================================
+    // 🧠 THE NEW BRAIN: "Hybrid Command Mode"
+    // ============================================================
     const prompt = `
       CONTEXT: User wants to "${userIntent}" on URL "${currentUrl}".
-      DOM: ${domSnapshot}
-
-      TASK: Return a JSON object with a JavaScript IIFE to execute this.
       
-      ⚠️ STRICT CONSTRAINTS (MUST FOLLOW):
-      1. USE ONLY VANILLA JAVASCRIPT (No 'require', No 'import', No Cypress/Playwright/Selenium).
-      2. USE DOM APIs: document.querySelector, dispatchEvent, click(), value = "".
-      3. EVENT DISPATCHING: When typing, you MUST dispatch 'keydown', 'input', and 'keyup' for every character.
-      4. POLLING: Use 'await new Promise' with 'setInterval' to wait for dropdowns.
-      5. SELECTORS: Prioritize IDs (#flights-search) and Name attributes (name='from').
-      6. OUTPUT FORMAT: Single line JSON.
+      SYSTEM NOTES: ${systemPrompt || "None"}
+
+      DOM SNAPSHOT (Truncated):
+      ${domSnapshot ? domSnapshot.substring(0, 25000) : "No DOM provided"}
+
+      TASK: 
+      Return a JSON object with a JavaScript execution plan.
+      
+      ⚠️ CRITICAL INSTRUCTION:
+      The frontend has a built-in "Hybrid Helper" library. 
+      You do NOT need to write complex event logic (no dispatchEvent, no input.value=...).
+      Simply return the async function calls using the provided helpers.
+
+      AVAILABLE HELPERS (Use these exclusively):
+      - await typeText(selector, text)  // Handles focus, clearing, typing, and React events automatically.
+      - await clickElement(selector)    // Handles waiting, scrolling, and clicking safely.
+
+      RULES:
+      1. Analyze the DOM to find the best CSS selectors (IDs preferred).
+      2. Return ONLY the sequence of helper calls.
+      3. Do NOT define the helpers yourself. They are already there.
+      4. OUTPUT FORMAT: Single line JSON.
 
       SCHEMA: { "script": "string", "thought": "string" }
     `;
@@ -94,17 +80,7 @@ app.post('/api/agent/decide', async (req, res) => {
     const duration = (Date.now() - start)/1000;
     
     const responseText = result.response.text();
-    
-    // ============================================================
-    // 🔍 DEEP INSPECTION: RESPONSE LOGGING
-    // ============================================================
-    console.log(`\n✅ AI GENERATED IN ${duration}s`);
-    console.log("🤖 RAW RESPONSE FROM AI:");
-    console.log("--------------------------------------------------");
-    console.log(responseText);
-    console.log("--------------------------------------------------");
-    console.log("⬆️ ⬆️ ⬆️ ⬆️ ⬆️ END OF TURN ⬆️ ⬆️ ⬆️ ⬆️ ⬆️\n");
-    // ============================================================
+    console.log(`✅ AI Replied in ${duration}s`);
 
     const actionPlan = parseGeminiResponse(responseText);
     res.json(actionPlan);
