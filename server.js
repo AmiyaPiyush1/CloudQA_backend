@@ -7,12 +7,12 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
-app.get('/', (req, res) => res.send("✅ Server is Running!"));
+app.get('/', (req, res) => res.send("✅ CloudQA Agent Server is Running!"));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash",
+    model: "gemini-2.5-flash", 
     generationConfig: { 
         responseMimeType: "application/json",
         temperature: 0.1,
@@ -33,22 +33,24 @@ app.post('/api/agent/decide', async (req, res) => {
   const start = Date.now();
   try {
     const { userIntent, domSnapshot, currentUrl } = req.body;
-    console.log("\n⬇️ ⬇️ ⬇️ ⬇️ ⬇️ INCOMING REQUEST ⬇️ ⬇️ ⬇️ ⬇️ ⬇️");
-    console.log(`🎯 GOAL: "${userIntent}"`);
+    
+    console.log("\n--- INCOMING REQUEST ---");
+    console.log(`🎯 INTENT: ${userIntent}`);
     console.log(`🔗 URL: ${currentUrl}`);
-    
-    if (domSnapshot) {
-        console.log(`📦 DOM SIZE: ${domSnapshot.length} chars`);
-    } else {
-        console.error("❌ ERROR: DOM Snapshot is EMPTY!");
-        return res.status(400).json({ error: "DOM Snapshot required" });
+
+    if (!domSnapshot || domSnapshot.length === 0) {
+        return res.status(400).json({ error: "DOM Snapshot is required" });
     }
+
     const prompt = `
-    You are an intelligent QA Automation Agent.
+    You are a CloudQA Test Recorder emulator. 
+    Analyze the provided DOM Snapshot and map the USER INTENT to a sequence of actionable steps.
     
-    TASK: Analyze the provided DOM Snapshot and map the USER INTENT to a sequence of actionable steps.
-    OUTPUT: Return a STRICT JSON ARRAY of objects.
-    
+    CRITICAL RULES:
+    1. ANALYZE ONLY THE PROVIDED DOM. Do not hallucinate elements.
+    2. ONE PAGE AT A TIME. If an action triggers navigation (e.g., clicking "Search"), it MUST be the last step in the array.
+    3. SCHEMA ADHERENCE: Return a STRICT JSON ARRAY following the CloudQA Recording Schema exactly.
+
     USER INTENT: "${userIntent}"
     CURRENT URL: "${currentUrl}"
     
@@ -56,40 +58,35 @@ app.post('/api/agent/decide', async (req, res) => {
     ${domSnapshot}
 
     ---------------------------------------------------
-    ⚠️ RULES FOR SELECTORS:
-    1. Look for 'id', 'name', 'data-test', 'data-testid', or unique 'class' attributes.
-    2. If the user wants to OPEN a URL, the first step must be type: "open".
-    3. If the user wants to TYPE, include the 'value' field.
-    4. If the user wants to CLICK, 'value' is not needed.
-    RULES:
-    1. ANALYZE ONLY THE PROVIDED DOM. Do not hallucinate elements that "should" be there.
-    2. ONE PAGE AT A TIME. If a user wants to "Book a Hotel", but you are on the Search Page, your ONLY job is to fill the search form and click "Search". Do NOT try to select a room yet.
-    3. STOP ON NAVIGATION. If an action (like clicking "Search" or "Login") will cause a page reload, that MUST be the LAST action in your array.
-    4. NO FUTURE PLANNING. Do not return steps for the next page.
-    
-    RESPONSE FORMAT (JSON ARRAY):
+    RESPONSE FORMAT (JSON ARRAY OF OBJECTS):
     [
       {
-        "name": "Short human-readable name of element",
-        "type": "click" | "type" | "open",
-        "selector": "CSS Selector (e.g. #username, .btn-primary)",
-        "value": "Text to type (only if type is 'type') or URL (if type is 'open')"
+        "type": "click" | "type" | "open" | "assert",
+        "isFrame": false,
+        "frameSelector": "",
+        "target": "A robust XPATH (e.g., //input[@id='hotel_location'])",
+        "cssPath": "A unique CSS selector (e.g., #hotel_location)",
+        "name": "Friendly name of the element",
+        "value": "Value to type OR the selector value",
+        "currentUrl": "${currentUrl}",
+        "isdeleted": false,
+        "pageTitle": "CloudQA Sandbox",
+        "pageHeader": "",
+        "htmltag": "The exact raw HTML tag of the element (e.g., <input type=\\\"text\\\" id=\\\"hotel_location\\\">)",
+        "hideCommand": false,
+        "text": "The value to type (only include this if type is 'type')"
       }
     ]
     ---------------------------------------------------
     `;
 
     const result = await model.generateContent(prompt);
-    const duration = (Date.now() - start)/1000;
-    
     const responseText = result.response.text();
     const actionPlan = parseGeminiResponse(responseText);
 
-    console.log(`\n✅ AI GENERATED IN ${duration}s`);
-    console.log("🤖 ACTION PLAN:");
-    console.log(JSON.stringify(actionPlan, null, 2));
-    console.log("⬆️ ⬆️ ⬆️ ⬆️ ⬆️ END OF TURN ⬆️ ⬆️ ⬆️ ⬆️ ⬆️\n");
-
+    const duration = (Date.now() - start) / 1000;
+    console.log(`✅ AI GENERATED SCHEMA IN ${duration}s`);
+    
     res.json(actionPlan);
 
   } catch (error) {
