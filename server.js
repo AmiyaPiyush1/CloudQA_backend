@@ -8,9 +8,8 @@ app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-// Note: Ensure your environment supports gemini-2.0-flash or 1.5-flash
 const model = genAI.getGenerativeModel({ 
-    model: "gemini-2.5-flash", 
+    model: "gemini-2.0-flash", 
     generationConfig: { responseMimeType: "application/json", temperature: 0.1 }
 });
 
@@ -23,9 +22,11 @@ app.post('/api/agent/decide', async (req, res) => {
     Analyze the DOM and URL to fulfill the USER INTENT.
 
     LOGIC RULES:
-    1. LOGIN GATE: If the URL/DOM indicates a Login Page and the INTENT requires being logged in, your ONLY priority is to generate login steps first.
-    2. REDIRECTS: If an action (click/submit) causes a page reload, it MUST be the last step in the array.
-    3. DOM LIMIT: Only suggest actions for elements present in the current DOM.
+    1. OBSTRUCTIONS: If a Cookie Banner, Modal, or "Accept/Allow" button is present, your ONLY priority is to click it to clear the view.
+    2. LOGIN GATE: If the URL/DOM indicates a Login Page and the INTENT requires being logged in, generate login steps first.
+    3. RELEVANCE CHECK: If the current site (URL/DOM) is irrelevant to the intent (e.g., Intent is "buy shirt" but site is "OrangeHRM"), look for a Search bar to find the item. If no search exists and it is impossible to fulfill the intent on this site, return an empty array [] and a "log" field explaining the mismatch.
+    4. REDIRECTS: If an action causes a page reload, it MUST be the last step in the array.
+    5. DOM LIMIT: Only suggest actions for elements present in the current DOM.
 
     USER INTENT: "${userIntent}"
     CURRENT URL: "${currentUrl}"
@@ -38,13 +39,17 @@ app.post('/api/agent/decide', async (req, res) => {
       "cssPath": "Unique CSS Selector",
       "name": "Friendly Name",
       "value": "Text to type",
-      "text": "Text to type",
-      "htmltag": "Tag name"
+      "log": "Explanation of reasoning or relevance mismatch"
     }]`;
 
     const result = await model.generateContent(prompt);
-    const actionPlan = JSON.parse(result.response.text().replace(/```json|```/g, '').trim());
+    const textResponse = result.response.text().replace(/```json|```/g, '').trim();
+    const actionPlan = JSON.parse(textResponse);
     
+    if (actionPlan.length > 0 && actionPlan[0].log) {
+        console.log(`[AGENT LOG]: ${actionPlan[0].log}`);
+    }
+
     console.log(`✅ Plan for ${currentUrl}:`, actionPlan);
     res.json(actionPlan);
   } catch (error) {
