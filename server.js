@@ -22,11 +22,11 @@ app.post('/api/agent/decide', async (req, res) => {
     Analyze the DOM and URL to fulfill the USER INTENT.
 
     LOGIC RULES:
-    1. MULTI-STEP PLAN: If the page has both an obstruction (Cookie Banner/Modal) AND the target action (Login/Signup/Search), return BOTH in the array. Place the obstruction-clearing step FIRST.
-    2. OBSTRUCTIONS: Identify elements like "Accept All", "Allow Cookies", or "Close Modal". Clearing these is the highest priority.
-    3. LOGIN GATE: If the intent requires authentication and login fields are visible, generate the typing and clicking steps for login.
-    4. REDIRECTS: If an action causes a page reload (like clicking 'Submit' or 'Search'), it MUST be the final step in the array.
-    5. RELEVANCE: If the site cannot fulfill the intent (e.g., buying a shirt on an HR site), prioritize finding a Search bar. If impossible, return [] with a log.
+    1. NO EMPTY RESPONSES: You must ALWAYS return at least one object. If no action is possible, return an object with type: "log".
+    2. MULTI-LAYER RESOLUTION: If a Cookie Banner (like Cookiebot in the DOM) or Modal is visible, your FIRST action must be to click "Allow all", "Accept", or "Close".
+    3. GOAL PRIORITY: After clearing obstructions, look for elements matching the INTENT (e.g., "30 Day Free Trial" or "Login").
+    4. RELEVANCE FALLBACK: If the site is irrelevant (e.g., "buy shirt" on OrangeHRM), look for a SEARCH bar. If no search exists, return: [{"type": "log", "message": "Site mismatch: Cannot find intent items or search bar on this domain."}]
+    5. DOM LIMIT: Work only with the provided DOM.
 
     USER INTENT: "${userIntent}"
     CURRENT URL: "${currentUrl}"
@@ -34,22 +34,28 @@ app.post('/api/agent/decide', async (req, res) => {
 
     RESPONSE (JSON ARRAY ONLY):
     [{
-      "type": "click" | "type",
+      "type": "click" | "type" | "log",
       "target": "XPATH",
-      "cssPath": "Unique CSS Selector",
-      "name": "Friendly Name",
-      "value": "Text to type",
-      "log": "Brief reasoning for this step (e.g., 'Clearing cookie banner before login')"
+      "cssPath": "CSS Selector",
+      "name": "Element Name",
+      "value": "Value to type",
+      "message": "Reasoning for the action or failure"
     }]`;
 
     const result = await model.generateContent(prompt);
     const textResponse = result.response.text().replace(/```json|```/g, '').trim();
-    const actionPlan = JSON.parse(textResponse);
     
-    console.log(`✅ Plan for ${currentUrl}:`, actionPlan);
+    // Safety check for empty JSON
+    let actionPlan = JSON.parse(textResponse);
+    if (!Array.isArray(actionPlan) || actionPlan.length === 0) {
+        actionPlan = [{ type: "log", message: "AI generated an empty plan. Check site relevance." }];
+    }
+    
+    console.log(`✅ Final Plan for ${currentUrl}:`, actionPlan);
     res.json(actionPlan);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    console.error("❌ API Error:", error.message);
+    res.status(500).json([{ type: "log", message: error.message }]);
   }
 });
 
