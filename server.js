@@ -23,7 +23,7 @@ app.post('/api/agent/decide', async (req, res) => {
 
     LOGIC RULES:
     1. NO EMPTY RESPONSES: You must ALWAYS return at least one object. If no action is possible, return an object with type: "log".
-    2. MULTI-LAYER RESOLUTION: If a Cookie Banner (like Cookiebot in the DOM) or Modal is visible, your FIRST action must be to click "Allow all", "Accept", or "Close".
+    2. MULTI-LAYER RESOLUTION: If a Cookie Banner (like Cookiebot in the DOM) or Modal is visible, your FIRST action must be to click "Allow all", "Accept", or "Close" along with other relevant options like login or sign up if the intent is something but to achieve that first we need to login in.
     3. GOAL PRIORITY: After clearing obstructions, look for elements matching the INTENT (e.g., "30 Day Free Trial" or "Login").
     4. RELEVANCE FALLBACK: If the site is irrelevant (e.g., "buy shirt" on OrangeHRM), look for a SEARCH bar. If no search exists, return: [{"type": "log", "message": "Site mismatch: Cannot find intent items or search bar on this domain."}]
     5. DOM LIMIT: Work only with the provided DOM.
